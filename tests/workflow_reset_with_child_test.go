@@ -61,8 +61,6 @@ func (s *WorkflowResetWithChildSuite) SetupTest() {
 // Case 1.a Reset point is before the child init and child is not running (i.e. child already completed), with random ChildIDs
 // This test will create 3 child workflows and resets between each child.
 func (s *WorkflowResetWithChildSuite) TestResetWithChild() {
-	// TODO: Enable this test when reset phase 2 is enabled.
-	s.T().Skip("Skipping until reset phase 2 is enabled")
 	wfID := "reset-workflow-with-children"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -165,8 +163,6 @@ func (s *WorkflowResetWithChildSuite) TestResetWithChild() {
 // Case 1.b Reset point is before the child init and child is not running (i.e. child already completed), with specified ChildIDs
 // This test will create 3 child workflows and resets between each child.
 func (s *WorkflowResetWithChildSuite) TestResetWithChild_WithChildID() {
-	// TODO: Enable this test when reset phase 2 is enabled.
-	s.T().Skip("Skipping until reset phase 2 is enabled")
 	wfID := "reset-workflow-with-children_with_child_id"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -293,8 +289,6 @@ func (s *WorkflowResetWithChildSuite) TestResetWithChild_WithChildID() {
 // Case 1.c Reset point is before the child init and child is not running (i.e. child already completed), with specified
 // ChildIDs and WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE. This test will create 3 child workflows and resets between each child.
 func (s *WorkflowResetWithChildSuite) TestResetWithChild_WithChildID_WithRejectDuplicate() {
-	// TODO: Enable this test when reset phase 2 is enabled.
-	s.T().Skip("Skipping until reset phase 2 is enabled")
 	wfID := "reset-workflow-with-children-with-child-workflow-id-with-reject-duplicate"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -373,8 +367,6 @@ func (s *WorkflowResetWithChildSuite) TestResetWithChild_WithChildID_WithRejectD
 
 // 2.a Reset point is before the child init and child is running at the time of reset. Child uses random WorkflowID.
 func (s *WorkflowResetWithChildSuite) TestResetWithChild_RunningChild_RandomWID() {
-	// TODO: Enable this test when reset phase 2 is enabled.
-	s.T().Skip("Skipping until reset phase 2 is enabled")
 	wfID := "reset-workflow-with-running-child"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -440,8 +432,6 @@ func (s *WorkflowResetWithChildSuite) TestResetWithChild_RunningChild_RandomWID(
 
 // 2.b Reset point is before the child init and child is running at the time of reset. Child uses fixed WorkflowID.
 func (s *WorkflowResetWithChildSuite) TestResetWithChild_RunningChild_SetWID() {
-	// TODO: Enable this test when reset phase 2 is enabled.
-	s.T().Skip("Skipping until reset phase 2 is enabled")
 	wfID := "reset-workflow-with-running-child-with-set-wid"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -499,8 +489,6 @@ func (s *WorkflowResetWithChildSuite) TestResetWithChild_RunningChild_SetWID() {
 
 // 2.c Reset point is before the child init and child is running at the time of reset. Child uses fixed WorkflowID and POLICY_REJECT_DUPLICATE.
 func (s *WorkflowResetWithChildSuite) TestResetWithChild_RunningChild_SetWID_WithRejectDuplicate() {
-	// TODO: Enable this test when reset phase 2 is enabled.
-	s.T().Skip("Skipping until reset phase 2 is enabled")
 	wfID := "reset-workflow-with-running-child-with-set-wid-with-reject-duplicate"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
