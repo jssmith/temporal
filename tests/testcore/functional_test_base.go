@@ -31,6 +31,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/payloads"
 	"go.temporal.io/server/common/persistence"
+	persistenceclient "go.temporal.io/server/common/persistence/client"
 	persistencetests "go.temporal.io/server/common/persistence/persistence-tests"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"
 	"go.temporal.io/server/common/primitives/timestamp"
@@ -105,6 +106,8 @@ type (
 		EnableArchival            bool
 		SpanExporter              sdktrace.SpanExporter
 		AdditionalServerOptions   []temporal.ServerOption
+		CustomDataStoreFactory    persistenceclient.AbstractDataStoreFactory
+		CustomUseSQLVisibility    *bool
 	}
 	TestClusterOption func(params *testClusterParams)
 )
@@ -191,6 +194,27 @@ func withSpanExporter(exporter sdktrace.SpanExporter) TestClusterOption {
 func WithSharedCluster() TestClusterOption {
 	return func(params *testClusterParams) {
 		params.SharedCluster = true
+	}
+}
+
+// WithCustomDataStoreFactory configures the test cluster to resolve its default
+// (non-visibility) datastore through a custom AbstractDataStoreFactory, for
+// authors writing their own testcore-based functional tests against an
+// out-of-tree persistence plugin.
+//
+// useSQLVisibility reports whether the plugin serves visibility through the SQL
+// visibility store; when false the harness provisions Elasticsearch, as it does
+// for Cassandra.
+//
+// The persistence TestBase (DefaultTestCluster) must still produce a
+// config.Persistence whose default store is a CustomDataStoreConfig. Supply that
+// by constructing the cluster with a custom persistenceTestBaseFactory (see
+// NewTestClusterFactory) or by registering a driver via
+// RegisterCustomPersistenceDriver.
+func WithCustomDataStoreFactory(main persistenceclient.AbstractDataStoreFactory, useSQLVisibility bool) TestClusterOption {
+	return func(params *testClusterParams) {
+		params.CustomDataStoreFactory = main
+		params.CustomUseSQLVisibility = &useSQLVisibility
 	}
 }
 
@@ -316,6 +340,8 @@ func (s *FunctionalTestBase) setupCluster(options ...TestClusterOption) {
 		EnableArchival:            params.EnableArchival,
 		AdditionalServerOptions:   params.AdditionalServerOptions,
 		WorkerConfig:              WorkerConfig{DisableWorker: !params.EnableWorkerService},
+		CustomDataStoreFactory:    params.CustomDataStoreFactory,
+		CustomUseSQLVisibility:    params.CustomUseSQLVisibility,
 	}
 	if params.SpanExporter != nil {
 		setSpanExporter(s.testClusterConfig, "test", params.SpanExporter)

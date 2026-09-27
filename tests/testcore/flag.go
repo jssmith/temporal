@@ -18,7 +18,7 @@ var cliFlags struct {
 
 func init() {
 	flag.StringVar(&cliFlags.persistenceType, "persistenceType", "sql", "type of persistence - [nosql or sql]")
-	flag.StringVar(&cliFlags.persistenceDriver, "persistenceDriver", "sqlite", "driver of nosql/sql - [cassandra, mysql8, postgres12, sqlite]")
+	flag.StringVar(&cliFlags.persistenceDriver, "persistenceDriver", "sqlite", "driver of nosql/sql - [cassandra, mysql8, postgres12, sqlite, or a registered custom driver]")
 	flag.StringVar(&cliFlags.enableFaultInjection, "enableFaultInjection", "", "enable global fault injection")
 }
 
@@ -28,6 +28,12 @@ func UseSQLVisibility() bool {
 		return true
 	// If the main storage is Cassandra, Elasticsearch is used for visibility.
 	default:
+		// A custom persistence driver (registered via RegisterCustomPersistenceDriver)
+		// declares its own visibility mode. Unknown drivers fall through to false,
+		// matching Cassandra; NewTestBase fails hard if the driver is not registered.
+		if d, ok := lookupCustomPersistenceDriver(cliFlags.persistenceDriver); ok {
+			return d.useSQLVisibility
+		}
 		return false
 	}
 }

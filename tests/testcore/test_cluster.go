@@ -54,6 +54,10 @@ type (
 	TestCluster struct {
 		testBase *persistencetests.TestBase
 		host     *temporalImpl
+		// useSQLVisibility is the resolved visibility mode for this cluster,
+		// captured at build time so teardown matches setup even when a per-cluster
+		// override (WithCustomDataStoreFactory) is in effect.
+		useSQLVisibility bool
 	}
 
 	// TestClusterConfig are config for a test cluster
@@ -79,6 +83,12 @@ type (
 		TokenProvider             auth.TokenProvider
 		TLSConfigProvider         *encryption.FixedTLSConfigProvider
 		AdditionalServerOptions   []temporal.ServerOption
+		// CustomDataStoreFactory, when set, overrides the AbstractDataStoreFactory
+		// used for the default (non-visibility) datastore. Set via WithCustomDataStoreFactory.
+		CustomDataStoreFactory persistenceclient.AbstractDataStoreFactory
+		// CustomUseSQLVisibility, when non-nil, overrides UseSQLVisibility() for this
+		// cluster. Set via WithCustomDataStoreFactory.
+		CustomUseSQLVisibility *bool
 	}
 
 	TestClusterFactory interface {
@@ -118,20 +128,34 @@ type defaultPersistenceTestBaseFactory struct{}
 
 // GetPersistenceTestDefaults returns the default persistence options based on CLI flags.
 // Use this when creating TestClusterConfig to ensure proper database configuration.
+//
+// For a custom persistence driver (registered via RegisterCustomPersistenceDriver)
+// the plugin's own TestBase constructor owns the persistence options, so this
+// returns an empty TestBaseOptions and lets that constructor fill them in.
 func GetPersistenceTestDefaults() persistencetests.TestBaseOptions {
+	if _, ok := lookupCustomPersistenceDriver(cliFlags.persistenceDriver); ok {
+		return persistencetests.TestBaseOptions{}
+	}
 	return *persistencetests.GetTestClusterOption(cliFlags.persistenceType, cliFlags.persistenceDriver)
 }
 
 func (f *defaultPersistenceTestBaseFactory) NewTestBase(options *persistencetests.TestBaseOptions) *persistencetests.TestBase {
-	defaults := GetPersistenceTestDefaults()
-	options.ApplyDefaults(&defaults)
-
 	if cliFlags.enableFaultInjection != "" && options.FaultInjection == nil {
 		// If -enableFaultInjection is passed to the test runner, then default fault injection config is added to the persistence options.
 		// If FaultInjectionConfig is already set by test, then it means that this test requires
 		// a specific fault injection configuration that takes precedence over a default one.
 		options.FaultInjection = config.DefaultFaultInjection()
 	}
+
+	// A custom persistence driver builds its own TestBase (with a
+	// CustomDataStoreConfig-backed DefaultTestCluster and an AbstractDataStoreFactory).
+	// This is the out-of-tree plugin path; see RegisterCustomPersistenceDriver.
+	if d, ok := lookupCustomPersistenceDriver(cliFlags.persistenceDriver); ok {
+		return d.newTestBase(options)
+	}
+
+	defaults := GetPersistenceTestDefaults()
+	options.ApplyDefaults(&defaults)
 
 	return persistencetests.NewTestBase(options)
 }
@@ -193,13 +217,22 @@ func newClusterWithPersistenceTestBaseFactory(
 
 	testBase := tbFactory.NewTestBase(&clusterConfig.Persistence)
 
+	// An AbstractDataStoreFactory supplied via WithCustomDataStoreFactory takes
+	// precedence over whatever the persistence TestBase was built with. This lets
+	// authors point the server's default datastore at an out-of-tree plugin.
+	if clusterConfig.CustomDataStoreFactory != nil {
+		testBase.AbstractDataStoreFactory = clusterConfig.CustomDataStoreFactory
+	}
+
+	useSQLVisibility := clusterConfig.useSQLVisibility()
+
 	testBase.Setup(clusterMetadataConfig)
 	var err error
 
 	pConfig := testBase.DefaultTestCluster.Config()
 	pConfig.NumHistoryShards = clusterConfig.HistoryConfig.NumHistoryShards
 
-	if !UseSQLVisibility() {
+	if !useSQLVisibility {
 		clusterConfig.ESConfig = &esclient.Config{
 			Indices: map[string]string{
 				esclient.VisibilityAppName: RandomizeStr("temporal_visibility_v1_test"),
@@ -337,7 +370,17 @@ func newClusterWithPersistenceTestBaseFactory(
 		return nil, err
 	}
 
-	return &TestCluster{testBase: testBase, host: host}, nil
+	return &TestCluster{testBase: testBase, host: host, useSQLVisibility: useSQLVisibility}, nil
+}
+
+// useSQLVisibility resolves the visibility mode for this cluster: a per-cluster
+// override set via WithCustomDataStoreFactory wins, otherwise the process-wide
+// value derived from the -persistenceDriver flag is used.
+func (c *TestClusterConfig) useSQLVisibility() bool {
+	if c.CustomUseSQLVisibility != nil {
+		return *c.CustomUseSQLVisibility
+	}
+	return UseSQLVisibility()
 }
 
 func newPProfInitializerImpl(logger log.Logger, port int) *pprof.PProfInitializerImpl {
@@ -384,7 +427,7 @@ func enableArchivalConfig(cfg *config.Config) {
 func (tc *TestCluster) TearDownCluster() error {
 	errs := tc.host.Stop()
 	tc.testBase.TearDownWorkflowStore()
-	if !UseSQLVisibility() {
+	if !tc.useSQLVisibility {
 		if esConfig := tc.host.serverConfig.Persistence.DataStores[tc.host.serverConfig.Persistence.VisibilityStore].Elasticsearch; esConfig != nil {
 			if err := persistencetests.DeleteEsIndex(esConfig, tc.host.logger); err != nil {
 				errs = multierr.Combine(errs, err)
