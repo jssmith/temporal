@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/redis/go-redis/v9"
@@ -51,13 +52,35 @@ const (
 	sqlitePluginName = "sqlite"
 )
 
-// memorydbAddr returns the Valkey/MemoryDB seed address. Overridable via env so a
-// run can target the cluster (7001-7003) instead of standalone.
-func memorydbAddr() string {
-	if a := os.Getenv("TEMPORAL_MEMORYDB_TEST_ADDR"); a != "" {
-		return a
+// memorydbAddrs returns the Valkey/MemoryDB seed addresses. It mirrors the
+// plugin's own testAddrs() helper so the harness can target the same fixtures:
+//
+//   - TEMPORAL_MEMORYDB_TEST_MODE=cluster selects cluster mode, seeded from a
+//     comma-separated TEMPORAL_MEMORYDB_TEST_ADDRS (default the local
+//     three-primary fixture 7001-7003). redis.NewUniversalClient only builds a
+//     ClusterClient when given two or more addresses, so cluster mode must pass
+//     the full seed list — a single address yields a standalone client and MOVED
+//     errors against a real cluster.
+//   - otherwise standalone, from TEMPORAL_MEMORYDB_TEST_ADDR (default
+//     127.0.0.1:6379).
+func memorydbAddrs() []string {
+	if strings.EqualFold(os.Getenv("TEMPORAL_MEMORYDB_TEST_MODE"), "cluster") {
+		raw := os.Getenv("TEMPORAL_MEMORYDB_TEST_ADDRS")
+		if raw == "" {
+			raw = "127.0.0.1:7001,127.0.0.1:7002,127.0.0.1:7003"
+		}
+		var addrs []string
+		for _, a := range strings.Split(raw, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				addrs = append(addrs, a)
+			}
+		}
+		return addrs
 	}
-	return "127.0.0.1:6379"
+	if a := os.Getenv("TEMPORAL_MEMORYDB_TEST_ADDR"); a != "" {
+		return []string{a}
+	}
+	return []string{"127.0.0.1:6379"}
 }
 
 // randHex returns n random bytes as lowercase hex. Panics on failure: a failed
@@ -79,16 +102,22 @@ type memorydbTestCluster struct {
 	addrs     []string
 	keyPrefix string
 	sqliteDB  string
+	// faultInjection, when non-nil, is attached to both datastores so the
+	// harness's fault-injection wrapper is applied — matching what the built-in
+	// SQL/Cassandra test clusters do (see sql.TestCluster.Config). Fault-injection
+	// suites (e.g. dlq, acquire-shard) pass this via WithPersistenceFaultInjection.
+	faultInjection *config.FaultInjection
 }
 
-func newMemorydbTestCluster() *memorydbTestCluster {
+func newMemorydbTestCluster(faultInjection *config.FaultInjection) *memorydbTestCluster {
 	return &memorydbTestCluster{
-		addrs: []string{memorydbAddr()},
+		addrs: memorydbAddrs(),
 		// "test:<32 hex>:" — same shape as the plugin's own isolation prefix.
 		keyPrefix: "test:" + randHex(16) + ":",
 		// Unique in-memory DB name per run; cache=shared makes every connection
 		// with this name see the same DB (required for a multi-service server).
-		sqliteDB: "memorydb_vis_" + randHex(12),
+		sqliteDB:       "memorydb_vis_" + randHex(12),
+		faultInjection: faultInjection,
 	}
 }
 
@@ -103,6 +132,7 @@ func (c *memorydbTestCluster) Config() config.Persistence {
 		NumHistoryShards: 1,
 		DataStores: map[string]config.DataStore{
 			memorydbDefaultStore: {
+				FaultInjection: c.faultInjection,
 				CustomDataStoreConfig: &config.CustomDatastoreConfig{
 					Name: memorydbDriverName,
 					Options: map[string]any{
@@ -112,6 +142,7 @@ func (c *memorydbTestCluster) Config() config.Persistence {
 				},
 			},
 			memorydbVisibilityStore: {
+				FaultInjection: c.faultInjection,
 				SQL: &config.SQL{
 					PluginName:         sqlitePluginName,
 					DatabaseName:       c.sqliteDB,
@@ -148,8 +179,17 @@ func (c *memorydbTestCluster) SetupTestDatabase() {
 	}
 }
 
-// TearDownTestDatabase scan-deletes only this run's keys from Valkey. The SQLite
-// in-memory DB is reclaimed when the server closes its connections.
+// TearDownTestDatabase scan-deletes only this run's keys from Valkey.
+//
+// The SQLite visibility DB is left to the sqlite plugin's connection pool. That
+// pool intentionally keeps one open connection per DSN for the process lifetime
+// (see common/persistence/sql/sqlplugin/sqlite/conn_pool.go), so an in-memory DB
+// is not reclaimed until the test binary exits. This matches the built-in sqlite
+// functional driver exactly (GetSQLiteMemoryTestClusterOption also mints a unique
+// per-cluster in-memory DB), so there is no cleanup we can do here that the
+// reference driver does not. In practice these DBs hold only the schema plus the
+// short-lived rows for one run's workflows, and each `go test` invocation is its
+// own process, so retention is bounded and small.
 func (c *memorydbTestCluster) TearDownTestDatabase() {
 	deleteMemorydbPrefix(c.addrs, c.keyPrefix)
 }
@@ -236,12 +276,17 @@ func memorydbScanOne(ctx context.Context, client redis.Cmdable, pattern string) 
 
 // newMemorydbTestBase builds a TestBase whose DefaultTestCluster is the memorydb
 // cluster above and whose AbstractDataStoreFactory is the real plugin adapter.
+//
+// options.FaultInjection carries any fault-injection config the harness resolved
+// (from -enableFaultInjection or a suite's WithPersistenceFaultInjection); it is
+// threaded into the datastores so the fault-injection wrapper is actually applied,
+// matching the built-in cassandra/sql path.
 func newMemorydbTestBase(options *persistencetests.TestBaseOptions) *persistencetests.TestBase {
 	logger := options.Logger
 	if logger == nil {
 		logger = log.NewTestLogger()
 	}
-	tb := persistencetests.NewTestBaseForCluster(newMemorydbTestCluster(), logger)
+	tb := persistencetests.NewTestBaseForCluster(newMemorydbTestCluster(options.FaultInjection), logger)
 	tb.AbstractDataStoreFactory = plugin.NewAbstractDataStoreFactory()
 	return tb
 }
