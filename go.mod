@@ -35,6 +35,13 @@ require (
 	github.com/iancoleman/strcase v0.3.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jmoiron/sqlx v1.4.0
+	// The MemoryDB/Valkey persistence plugin, wired in only for the build-tagged
+	// functional-test registration file (tests/testcore/register_memorydb.go). The
+	// module cycle (plugin imports go.temporal.io/server, which resolves back to
+	// this module) is fine: a dependency's own replace directives are ignored, so
+	// the plugin's `replace go.temporal.io/server => ../temporal` has no effect
+	// here.
+	github.com/jssmith/temporal-memorydb-plugin v0.0.0
 	github.com/jstemmer/go-junit-report/v2 v2.1.0
 	github.com/lib/pq v1.12.3
 	github.com/maruel/panicparse/v2 v2.5.0
@@ -46,6 +53,7 @@ require (
 	github.com/prometheus/client_golang v1.21.0
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.62.0
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sony/gobreaker v1.0.0
 	github.com/stretchr/testify v1.11.1
@@ -135,6 +143,7 @@ require (
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
@@ -234,5 +243,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/jssmith/temporal-memorydb-plugin => ../plugin
 
 tool golang.org/x/perf/cmd/benchstat
